@@ -258,7 +258,6 @@ async function paraClientFor(owner) {
   return createParaViemClient({
     para,
     walletClientConfig: {
-      account: lower(owner),
       chain: monad,
       transport: MONAD_TRANSPORT,
     },
@@ -282,7 +281,6 @@ async function sendViaPara(owner, tx) {
   }
   const client = await paraClientFor(owner);
   const req = {
-    account: lower(owner),
     chain: monad,
     to: tx.to,
     data: tx.data,
