@@ -336,6 +336,11 @@ async function fireWithPara(row) {
   }
 
   const slippageBps = Number(row.slippage_bps || 50);
+  const directNadfun = isNadfunCurve(await nadfunTokenMeta(token));
+  if (directNadfun) {
+    return fireNadfun({ owner, token, side, amountIn, netIn, slippageBps });
+  }
+
   try {
     return await fireDirol({ owner, token, side, amountIn, netIn, slippageBps });
   } catch (err) {
@@ -384,7 +389,7 @@ async function fireDirol({ owner, token, side, amountIn, netIn, slippageBps }) {
   });
 }
 
-async function nadfunTokenVersion(token) {
+async function nadfunTokenMeta(token) {
   try {
     const res = await fetch(`${NADFUN_BASE}/token/metadata/${token}`, {
       headers: { accept: "application/json", ...(NADFUN_KEY ? { "X-API-Key": NADFUN_KEY } : {}) },
@@ -392,10 +397,22 @@ async function nadfunTokenVersion(token) {
     if (!res.ok) return null;
     const json = await res.json();
     const version = json?.token_info?.version;
-    return version === "V1" || version === "V2" ? version : null;
+    const marketType = typeof json?.market_info?.market_type === "string" ? json.market_info.market_type : null;
+    const isGraduated = typeof json?.token_info?.is_graduated === "boolean" ? json.token_info.is_graduated : null;
+    return {
+      version: version === "V1" || version === "V2" ? version : null,
+      marketType,
+      isGraduated,
+    };
   } catch {
     return null;
   }
+}
+
+function isNadfunCurve(meta) {
+  if (!meta) return false;
+  if (meta.isGraduated === false) return true;
+  return /CURVE/i.test(meta.marketType || "");
 }
 
 function applySlippage(amount, slippageBps) {
@@ -405,7 +422,7 @@ function applySlippage(amount, slippageBps) {
 }
 
 async function getNadfunRoute(token, amountIn, isBuy) {
-  const version = await nadfunTokenVersion(token);
+  const version = (await nadfunTokenMeta(token))?.version ?? null;
   if (version !== "V1") {
     try {
       const amountOut = await publicClient.readContract({
