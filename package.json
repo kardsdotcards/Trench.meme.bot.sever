@@ -1,0 +1,21 @@
+{
+  "name": "trenchmeme-bot",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "start": "node bot.js",
+    "railway": "node railway.js"
+  },
+  "dependencies": {
+    "@getpara/server-sdk": "3.1.0",
+    "@getpara/viem-v2-integration": "3.1.0",
+    "@supabase/supabase-js": "^2.106.2",
+    "dotenv": "^16.6.1",
+    "gun": "^0.2020.1241",
+    "viem": "^2.51.3",
+    "ws": "^8.18.0"
+  }
+}
