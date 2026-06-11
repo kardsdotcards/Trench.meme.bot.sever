@@ -306,13 +306,11 @@ async function fireWithPara(row) {
   const venue = await resolveVenue(token, row.venue);
   const source = row.source === "limit" ? "LIMIT" : row.source === "copy" ? "COPY" : "MARKET";
   const feeBps = BigInt(Number(env[`FEE_BPS_${source}`] ?? env.FEE_BPS_MARKET ?? "0"));
-  const feeAmount = isBuy && isAddress(FEE_WALLET) && feeBps > 0n ? (amountIn * feeBps) / 10000n : 0n;
-  const netIn = amountIn - feeAmount;
+  const feeAmount = 0n;
+  const netIn = amountIn;
 
-  if (feeAmount > 0n) {
-    const feeHash = await sendViaPara(owner, { to: FEE_WALLET, value: feeAmount });
-    const rcpt = await publicClient.waitForTransactionReceipt({ hash: feeHash, timeout: 60_000 });
-    if (rcpt.status !== "success") throw new Error(`fee tx reverted (${feeHash})`);
+  if (isBuy && isAddress(FEE_WALLET) && feeBps > 0n) {
+    log("executor", "buy fee transfer skipped; executing swap without pre-fee tx");
   }
 
   if (venue === "dirol") {
