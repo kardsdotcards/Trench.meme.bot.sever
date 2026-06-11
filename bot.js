@@ -15,8 +15,13 @@ import { Para, Environment } from "@getpara/server-sdk";
 import { createParaViemClient } from "@getpara/viem-v2-integration";
 
 const env = process.env;
-const REQUIRED = ["VITE_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "PARA_API_KEY"];
+const SUPABASE_URL = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
+const PARA_API_KEY = env.PARA_API_KEY || env.VITE_PARA_API_KEY;
 const OPTIONAL = [
+  "SUPABASE_URL",
+  "VITE_SUPABASE_URL",
+  "VITE_PARA_API_KEY",
   "PARA_API_SECRET",
   "MONAD_RPC_URL",
   "FEE_WALLET_ADDRESS",
@@ -32,9 +37,14 @@ const OPTIONAL = [
   "GUN_MAX_MESSAGE_AGE_DAYS",
 ];
 
-const missing = REQUIRED.filter((key) => !env[key]);
+const missing = [
+  !SUPABASE_URL ? "SUPABASE_URL or VITE_SUPABASE_URL" : null,
+  !SUPABASE_SERVICE_ROLE_KEY ? "SUPABASE_SERVICE_ROLE_KEY" : null,
+  !PARA_API_KEY ? "PARA_API_KEY or VITE_PARA_API_KEY" : null,
+].filter(Boolean);
 if (missing.length) {
-  console.error("[bot] fatal: missing required env vars:", missing.join(", "));
+  console.error("[bot] fatal: missing required Railway variables:", missing.join(", "));
+  console.error("[bot] set these in Railway > Service > Variables, then redeploy.");
   process.exit(1);
 }
 
@@ -50,7 +60,6 @@ const GUN_DATA_DIR = env.GUN_DATA_DIR || "./gun-data";
 const GUN_ALLOW_ORIGIN = env.GUN_ALLOW_ORIGIN || "*";
 const RPC = env.MONAD_RPC_URL || env.VITE_MONAD_RPC_URL || "https://rpc.monad.xyz";
 const DIROL_BASE = env.DIROL_API_BASE || "https://api.dirol.io/api/v1";
-const PARA_API_KEY = env.PARA_API_KEY;
 const PARA_API_SECRET = env.PARA_API_SECRET || "";
 const FEE_WALLET = env.FEE_WALLET_ADDRESS || "";
 const NADFUN_ROUTER = "0x0B79d71AE99528D1dB24A4148b5f4F865cc2b137";
@@ -61,7 +70,7 @@ if (!PARA_API_SECRET) {
   console.warn("[bot] PARA_API_SECRET is empty. Para signing uses PARA_API_KEY here, but keep the secret in Railway.");
 }
 
-const sb = createClient(env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
   realtime: { transport: WS },
 });
@@ -215,10 +224,16 @@ server.listen(PORT, HOST, () => {
 async function paraClientFor(owner) {
   const { data, error } = await sb
     .from("para_wallets")
-    .select("session, session_cookie")
+    .select("session, session_cookie, expires_at, updated_at")
     .eq("owner_address", lower(owner))
     .maybeSingle();
   if (error) throw error;
+  const expiresAt = data?.expires_at
+    ? +new Date(data.expires_at)
+    : data?.updated_at
+      ? +new Date(data.updated_at) + 7 * 86_400_000
+      : 0;
+  if (expiresAt && Date.now() > expiresAt) throw new Error(`Para session expired for ${owner}; sign in again`);
   if (!data?.session && !data?.session_cookie) throw new Error(`no Para session for ${owner}`);
 
   const para = new Para(Environment.PROD, PARA_API_KEY);
@@ -239,15 +254,37 @@ async function paraClientFor(owner) {
 }
 
 async function sendViaPara(owner, tx) {
+  let gas = tx.gas;
+  if (!gas) {
+    try {
+      gas = await publicClient.estimateGas({
+        account: lower(owner),
+        to: tx.to,
+        data: tx.data,
+        value: tx.value,
+      });
+      gas = (gas * 13n) / 10n;
+    } catch {
+      if (!tx.data) gas = 42_000n;
+    }
+  }
   const client = await paraClientFor(owner);
-  return client.sendTransaction({
+  const req = {
     account: lower(owner),
     chain: monad,
     to: tx.to,
     data: tx.data,
     value: tx.value,
-    gas: tx.gas,
-  });
+    gas,
+  };
+  try {
+    return await client.sendTransaction(req);
+  } catch (err) {
+    const msg = String(err?.shortMessage || err?.message || err);
+    if (!/rpc request failed|network|timeout|fetch/i.test(msg)) throw err;
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    return client.sendTransaction(req);
+  }
 }
 
 async function resolveVenue(tokenAddress, requested) {
