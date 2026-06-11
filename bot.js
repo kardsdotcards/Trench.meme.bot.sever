@@ -74,7 +74,7 @@ const MONAD_TRANSPORT = viemFallback(UNIQUE_RPC_URLS.map((url) => viemHttp(url))
 const DIROL_BASE = env.DIROL_API_BASE || "https://api.dirol.io/api/v1";
 const PARA_API_SECRET = env.PARA_API_SECRET || "";
 const FEE_WALLET = env.FEE_WALLET_ADDRESS || "";
-const NADFUN_ROUTER = "0x0B79d71AE99528D1dB24A4148b5f4F865cc2b137";
+const NADFUN_ROUTER = "0x8986C8fD44eb85294A725a7e61AF35E76bA26F91";
 const WMON = "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A";
 const FIRE_COOLDOWN_MS = 5 * 60_000;
 
@@ -246,13 +246,22 @@ async function paraClientFor(owner) {
       ? +new Date(data.updated_at) + 7 * 86_400_000
       : 0;
   if (expiresAt && Date.now() > expiresAt) throw new Error(`Para session expired for ${owner}; sign in again`);
-  if (!data?.session && !data?.session_cookie) throw new Error(`no Para session for ${owner}`);
+  if (!data?.session) throw new Error(`no zero-popup Para session for ${owner}; sign out and back in`);
+
+  try {
+    const decoded = JSON.parse(Buffer.from(data.session, "base64").toString("utf8"));
+    const wallets = Object.values(decoded.wallets || {});
+    const hasEvmSigner = wallets.some((w) => w?.type === "EVM" && w?.signer);
+    if (!hasEvmSigner || !decoded.sessionCookie) throw new Error("missing signer");
+  } catch {
+    throw new Error(`saved Para session is not zero-popup ready for ${owner}; sign out and back in`);
+  }
 
   const para = new Para(Environment.PROD, PARA_API_KEY);
   if (data.session && typeof para.importSession === "function") {
     await para.importSession(data.session);
   } else {
-    para.retrieveSessionCookie = () => data.session_cookie;
+    throw new Error(`Para importSession unavailable for ${owner}`);
   }
 
   return createParaViemClient({
