@@ -7,6 +7,7 @@ import {
   createPublicClient,
   createWalletClient,
   encodeFunctionData,
+  fallback as viemFallback,
   http as viemHttp,
   parseAbi,
 } from "viem";
@@ -58,7 +59,18 @@ const PORT = Number(env.PORT || env.GUN_PORT || 8765);
 const HOST = env.GUN_HOST || "0.0.0.0";
 const GUN_DATA_DIR = env.GUN_DATA_DIR || "./gun-data";
 const GUN_ALLOW_ORIGIN = env.GUN_ALLOW_ORIGIN || "*";
-const RPC = env.MONAD_RPC_URL || env.VITE_MONAD_RPC_URL || "https://rpc.monad.xyz";
+const RPC_URLS = [
+  env.MONAD_RPC_URL,
+  env.VITE_MONAD_RPC_URL,
+  ...(env.MONAD_RPC_FALLBACK_URLS || "").split(","),
+  "https://rpc.monad.xyz",
+].map((url) => url?.trim()).filter(Boolean);
+const UNIQUE_RPC_URLS = [...new Set(RPC_URLS)];
+const RPC = UNIQUE_RPC_URLS[0];
+const MONAD_TRANSPORT = viemFallback(UNIQUE_RPC_URLS.map((url) => viemHttp(url)), {
+  rank: false,
+  retryCount: 1,
+});
 const DIROL_BASE = env.DIROL_API_BASE || "https://api.dirol.io/api/v1";
 const PARA_API_SECRET = env.PARA_API_SECRET || "";
 const FEE_WALLET = env.FEE_WALLET_ADDRESS || "";
@@ -82,7 +94,7 @@ const monad = {
   rpcUrls: { default: { http: [RPC] } },
 };
 
-const publicClient = createPublicClient({ chain: monad, transport: viemHttp(RPC) });
+const publicClient = createPublicClient({ chain: monad, transport: MONAD_TRANSPORT });
 
 const NADFUN_ROUTER_ABI = parseAbi([
   "function buyWithNative((address token,uint256 amountOutMin,address to,uint256 deadline)) payable returns (uint256)",
@@ -248,7 +260,7 @@ async function paraClientFor(owner) {
     walletClientConfig: {
       account: lower(owner),
       chain: monad,
-      transport: viemHttp(RPC),
+      transport: MONAD_TRANSPORT,
     },
   });
 }
